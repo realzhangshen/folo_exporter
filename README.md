@@ -43,7 +43,7 @@ Since this extension is not yet in the Chrome Web Store, you can install it manu
 
 1.  Make changes to the code (e.g., `content.js` logic).
 2.  Go to `chrome://extensions/`.
-3.  Find "SuperMe: RSS Exporter" and click the **Refresh** (circular arrow) icon.
+3.  Find "Follow Exporter" and click the **Refresh** (circular arrow) icon.
 4.  Reload the Follow.is web page to apply changes.
 
 ## License

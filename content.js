@@ -1,43 +1,61 @@
 /**
- * Extracts links from the Follow.is timeline.
- * @param {boolean} onlyUnread - If true, only returns links customized as unread.
- * @returns {string} - A newline-separated string of Markdown links.
+ * CONTENT SCRIPT
+ * Runs in Isolated World.
+ * 1. Injects the injected.js script tag.
+ * 2. Listens for completion.
+ * 3. Harvests the data.
  */
-function extractLinks(onlyUnread) {
-    // Select all links (including relative ones)
+
+function injectAndRun() {
+    return new Promise((resolve) => {
+        // Create script tag pointing to our web accessible resource
+        const script = document.createElement('script');
+        script.src = chrome.runtime.getURL('injected.js');
+        script.onload = function () {
+            this.remove();
+        };
+
+        // Listen for the complete event FIRST before injecting
+        const listener = () => {
+            document.removeEventListener('FOLO_LINKS_READY', listener);
+            resolve();
+        };
+        document.addEventListener('FOLO_LINKS_READY', listener);
+
+        // Inject
+        (document.head || document.documentElement).appendChild(script);
+    });
+}
+
+function generateMarkdown(onlyUnread) {
     const links = Array.from(document.querySelectorAll('a'));
     const uniqueLinks = new Set();
     const markdownList = [];
 
     links.forEach(a => {
-        const url = a.href;
+        // Prefer the data-original-url set by the injected script, fallback to href
+        let url = a.dataset.originalUrl || a.href;
 
-        // CLEANUP TITLE: Split by newline and take the first line to avoid capturing summary/time metadata
         const rawTitle = a.innerText.trim();
         const title = rawTitle.split('\n')[0].trim();
 
-        // UNREAD DETECTION LOGIC
-        // Read items in Follow.is usually have the class 'text-text-secondary' applied to the title or its parent.
-        // Unread items typically use the default text color (black/dark).
+        // Unread check logic
         let isUnread = true;
-
-        // Find the specific element that holds the title text to check its class
         const allElements = Array.from(a.querySelectorAll('*'));
         const titleEl = allElements.find(el => el.innerText && el.innerText.trim() === title && el.children.length === 0) || a;
-
-        // Check for the "read" color class
         if (titleEl.classList.contains('text-text-secondary') || (titleEl.parentElement && titleEl.parentElement.classList.contains('text-text-secondary'))) {
             isUnread = false;
         }
 
-        // Apply filters to exclude non-article links
-        // - Title length > 5: Avoids icons or empty links
-        // - url.startsWith('http'): Valid absolute URLs only
-        // - !uniqueLinks.has(url): Deduplicate
-        // - Exclude /feed/ and /profile/ links which are internal navigation
-        if (title.length > 5 && url.startsWith('http') && !uniqueLinks.has(url) && !url.includes('/feed/') && !url.includes('/profile/')) {
+        if (title.length > 5 &&
+            (url.startsWith('http') || url.startsWith('https')) &&
+            !uniqueLinks.has(url) &&
+            !url.includes('/feed/') &&
+            !url.includes('/profile/') &&
+            !url.includes('/timeline/') // Now we can strictly filter timeline links
+        ) {
 
-            if (onlyUnread && !isUnread) return; // Skip read items if requested
+            if (onlyUnread && !isUnread) return;
 
             uniqueLinks.add(url);
             markdownList.push(`- [ ] [${title}](${url})`);
@@ -51,13 +69,18 @@ function extractLinks(onlyUnread) {
 // Listen for messages from the popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "extract") {
-        try {
-            const data = extractLinks(request.onlyUnread);
-            const count = data ? data.split('\n').length : 0;
-            sendResponse({ data: data, count: count });
-        } catch (error) {
-            console.error("Extraction failed:", error);
-            sendResponse({ data: "", count: 0, error: error.message });
-        }
+        // 1. Inject script to populate data attributes
+        injectAndRun().then(() => {
+            // 2. Read DOM
+            try {
+                const data = generateMarkdown(request.onlyUnread);
+                const count = data ? data.split('\n').length : 0;
+                sendResponse({ data: data, count: count });
+            } catch (error) {
+                console.error("Extraction failed:", error);
+                sendResponse({ data: "", count: 0, error: error.message });
+            }
+        });
+        return true; // Keep channel open for async response
     }
 });
