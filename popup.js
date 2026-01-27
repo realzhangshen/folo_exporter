@@ -4,8 +4,8 @@
  */
 
 const API_BASE = 'https://api.folo.is';
-const BATCH_SIZE = 200;  // 请求大小
-const API_MAX_LIMIT = 100;  // API 实际上限
+const BATCH_SIZE = 100;  // API 强制限制 100
+const API_MAX_LIMIT = 100;
 const CACHE_KEY = 'folo_cache';
 
 // State
@@ -276,21 +276,25 @@ async function handleClear() {
 
 async function fetchAllUnread() {
   let hasMore = true;
-  let publishedBefore = null;
+  let publishedAfter = null;
   let requestCount = 0;
 
   while (hasMore) {
     requestCount++;
+
+    // 构建请求体
     const body = {
       limit: BATCH_SIZE,
       view: -1,
       read: false
     };
-    if (publishedBefore) {
-      body.publishedBefore = publishedBefore;
+
+    // 使用 publishedAfter 作为分页游标
+    if (publishedAfter) {
+      body.publishedAfter = publishedAfter;
     }
 
-    console.log(`[Folo Exporter] Request #${requestCount}: limit=${BATCH_SIZE}, publishedBefore=${publishedBefore || 'none'}`);
+    console.log(`[Folo Exporter] Request #${requestCount}:`, JSON.stringify(body, null, 2));
 
     const response = await fetch(`${API_BASE}/entries`, {
       method: 'POST',
@@ -300,23 +304,28 @@ async function fetchAllUnread() {
     });
 
     if (!response.ok) {
+      console.error(`[Folo Exporter] API error:`, response.status, response.statusText);
       throw new Error('Failed to fetch articles');
     }
 
-    const result = await response.json();
-    const entries = result.data || [];
+    // 1. 获取完整 JSON 以寻找分页线索
+    const fullResult = await response.json();
 
-    console.log(`[Folo Exporter] Response #${requestCount}: got ${entries.length} entries`);
+    // 调试：打印完整的响应结构（不仅仅是 data），寻找 hidden cursor
+    console.log(`[Folo Exporter] Response #${requestCount} FULL META:`, fullResult);
+
+    const entries = fullResult.data || [];
+    console.log(`[Folo Exporter] Got ${entries.length} entries`);
 
     if (entries.length === 0) {
+      console.log(`[Folo Exporter] No more entries, stopping`);
       hasMore = false;
     } else {
-      // Process entries (with deduplication)
-      const beforeCount = articles.length;
+      let newCount = 0;
       for (const entry of entries) {
         const id = entry.entries?.id;
         if (id && seenIds.has(id)) {
-          continue; // Skip duplicate
+          continue;
         }
         if (id) {
           seenIds.add(id);
@@ -326,29 +335,48 @@ async function fetchAllUnread() {
           title: entry.entries?.title || 'Untitled',
           url: entry.entries?.url || '',
           publishedAt: entry.entries?.publishedAt,
+          insertedAt: entry.entries?.insertedAt,
           summary: entry.entries?.summary || '',
           feedTitle: entry.feeds?.title || 'Unknown',
           category: entry.subscriptions?.category || 'Uncategorized'
         });
+        newCount++;
       }
 
+      console.log(`[Folo Exporter] Added ${newCount} new articles (total: ${articles.length})`);
       progressCount.textContent = articles.length;
-      // Use the last entry's publishedAt as the cursor for next request
-      const lastEntry = entries[entries.length - 1];
-      if (lastEntry?.entries?.publishedAt) {
-        publishedBefore = lastEntry.entries.publishedAt;
+
+      // 如果全是重复的，说明分页参数没生效，必须强制停止，防止死循环
+      if (newCount === 0) {
+        console.warn(`[Folo Exporter] Pagination failed: got 100% duplicates. Stopping to avoid infinite loop.`);
+        hasMore = false;
+        break;
       }
 
-      // If we got less than API's max limit, we're done
-      if (entries.length < API_MAX_LIMIT) {
-        hasMore = false;
+      // 准备下一页的游标
+      const lastEntry = entries[entries.length - 1];
+      if (lastEntry?.entries) {
+        publishedAfter = lastEntry.entries.publishedAt;
+        console.log(`[Folo Exporter] Next publishedAfter: ${publishedAfter}`);
       }
-      // If all entries were duplicates, we're also done
-      else if (articles.length === beforeCount) {
+
+      // 修正：API 强制最大 100 条。
+      // 所以只有当返回数量明显少于 100 时，才认为是最后一页。
+      // 如果返回了 100 条，说明可能还有更多，必须继续请求。
+      const REAL_API_LIMIT = 100;
+      if (entries.length < REAL_API_LIMIT) {
+        console.log(`[Folo Exporter] Got ${entries.length} < ${REAL_API_LIMIT}, end of list reached`);
         hasMore = false;
       }
     }
+
+    if (requestCount >= 50) { // 防止失控
+      console.warn(`[Folo Exporter] Safety limit reached (50 requests)`);
+      hasMore = false;
+    }
   }
+
+  console.log(`[Folo Exporter] Complete: ${articles.length} articles`);
 }
 
 function displayResults() {
@@ -512,47 +540,62 @@ async function markAsRead() {
     .map(a => a.id)
     .filter(id => id != null);
 
+  console.log(`[Folo Exporter] Marking ${entryIds.length} entries as read`);
+
   if (entryIds.length === 0) {
     return { success: false, error: '没有有效的文章 ID' };
   }
 
-  try {
-    // Try batch API first
-    // NOTE: API endpoint to be verified via browser DevTools
-    const response = await fetch(`${API_BASE}/entries`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        entryIds: entryIds,
-        read: true
-      })
-    });
-
-    if (response.ok) {
-      return { success: true, count: entryIds.length };
-    }
-
-    // If batch fails, try alternative endpoint
-    const altResponse = await fetch(`${API_BASE}/entries/read`, {
+  // Try different endpoints for api.folo.is
+  // The backend API uses /reads/markAsRead but the frontend API might be different
+  const endpoints = [
+    // Try the backend API path first
+    {
+      url: `${API_BASE}/reads/markAsRead`,
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        entryIds: entryIds
-      })
-    });
-
-    if (altResponse.ok) {
-      return { success: true, count: entryIds.length };
+      body: { entryIds, isInbox: false }
+    },
+    // Alternative: PATCH /entries
+    {
+      url: `${API_BASE}/entries`,
+      method: 'PATCH',
+      body: { entryIds, read: true }
+    },
+    // Alternative: POST /entries/read
+    {
+      url: `${API_BASE}/entries/read`,
+      method: 'POST',
+      body: { entryIds }
     }
+  ];
 
-    const errorText = await response.text();
-    return { success: false, error: errorText || 'API 请求失败' };
+  for (const endpoint of endpoints) {
+    console.log(`[Folo Exporter] Trying: ${endpoint.method} ${endpoint.url}`);
 
-  } catch (e) {
-    return { success: false, error: e.message || '网络连接失败' };
+    try {
+      const response = await fetch(endpoint.url, {
+        method: endpoint.method,
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(endpoint.body)
+      });
+
+      console.log(`[Folo Exporter] Response status: ${response.status}`);
+
+      if (response.ok) {
+        const result = await response.json().catch(() => ({}));
+        console.log(`[Folo Exporter] Success! Response:`, result);
+        return { success: true, count: entryIds.length };
+      }
+
+      const errorText = await response.text();
+      console.log(`[Folo Exporter] Failed: ${errorText}`);
+    } catch (e) {
+      console.log(`[Folo Exporter] Error: ${e.message}`);
+    }
   }
+
+  return { success: false, error: '所有 API 端点都失败，请查看控制台获取详情' };
 }
 
 function showMessage(text, type) {
