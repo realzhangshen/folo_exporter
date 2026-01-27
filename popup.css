@@ -37,6 +37,34 @@ h1 {
   border: 1px solid #e5e5e5;
 }
 
+/* Cache Status */
+.cache-status {
+  text-align: center;
+  padding: 8px;
+  background: #f0f9ff;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+
+.cache-status.stale {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
+/* Action Buttons */
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.action-buttons .btn {
+  flex: 1;
+}
+
 .status-dot {
   width: 8px;
   height: 8px;

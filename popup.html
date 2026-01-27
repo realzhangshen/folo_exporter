@@ -14,9 +14,18 @@
       <span id="status-text">Checking connection...</span>
     </div>
 
-    <button id="fetch-btn" class="btn btn-primary" disabled>
-      <span id="fetch-btn-text">Fetch Unread Articles</span>
-    </button>
+    <div id="cache-status" class="cache-status hidden">
+      <span id="cache-text"></span>
+    </div>
+
+    <div class="action-buttons">
+      <button id="fetch-btn" class="btn btn-primary" disabled>
+        <span id="fetch-btn-text">Fetch Unread Articles</span>
+      </button>
+      <button id="clear-btn" class="btn btn-secondary hidden">
+        Clear
+      </button>
+    </div>
 
     <div id="progress" class="progress hidden">
       <div class="progress-text">Fetching... <span id="progress-count">0</span> articles</div>
