@@ -1,51 +1,71 @@
+# Folo Exporter
 
-# Follow.is RSS Exporter
-
-Helper extension for [Follow.is](https://folo.is/) to export unread or all visible articles from your timeline into a clean Markdown list format. Perfect for archiving, sharing, or processing your reading list in other tools (like Notion, Obsidian, etc.).
+A Chrome extension to export all unread articles from [Folo](https://app.folo.is/) (formerly Follow.is) to Markdown format.
 
 ## Features
 
-- **One-Click Export**: Extract article titles and links directly from your current view.
-- **Smart Filtering**:
-    - **Unread Only**: Default mode exports only articles you haven't read yet (detects `text-text-secondary` styling).
-    - **All Articles**: Toggle to export everything currently visible on the page.
-- **Clean Markdown**: Outputs a checklist format `- [ ] [Title](URL)` ready for immediate use.
-- **Privacy Focused**: Runs locally in your browser. No data is sent to external servers.
+- **Fetch All Unread**: Retrieves all unread articles via API, not limited to visible items
+- **No Read Trigger**: Uses direct API calls, won't mark articles as read
+- **Category Grouping**: Articles grouped by your Folo categories
+- **Rich Export**: Includes title, source, time, link, and AI summary (if available)
+- **Multiple Formats**: Export grouped by category or as a flat list
+- **Copy or Download**: Copy to clipboard or download as .md file
 
 ## Installation
 
-Since this extension is not yet in the Chrome Web Store, you can install it manually in Developer Mode:
-
-1.  **Clone or Download** this repository to a folder on your computer.
-2.  Open Chrome and navigate to `chrome://extensions/`.
-3.  Enable **Developer mode** in the top right corner.
-4.  Click **Load unpacked**.
-5.  Select the folder where you downloaded this project.
+1. Clone or download this repository
+2. Open Chrome and go to `chrome://extensions/`
+3. Enable **Developer mode** (top right)
+4. Click **Load unpacked**
+5. Select the folder containing this extension
 
 ## Usage
 
-1.  Log in to [app.folo.is](https://app.folo.is/).
-2.  Scroll through your timeline to load the articles you want to process.
-3.  Click the **Follow Exporter** icon in your browser toolbar.
-4.  (Optional) Uncheck "Only Unread Articles" if you want to export everything.
-5.  Click **Copy to Clipboard**.
-6.  Paste the result into your notes app or text editor.
+1. Log in to [app.folo.is](https://app.folo.is/) in Chrome
+2. Click the **Folo Exporter** icon in your browser toolbar
+3. Click **Fetch Unread Articles**
+4. Choose export format (grouped or flat)
+5. Click **Copy to Clipboard** or **Download .md**
 
-## Development
+## Export Format
 
-### Project Structure
+```markdown
+# Folo Unread Articles Export
+Export time: 1/27/2026, 3:30:00 PM
+Total: 103 articles
 
-- `manifest.json`: Configuration using Manifest V3.
-- `content.js`: The logic that runs on the web page to find and extract links.
-- `popup.html` & `popup.js`: The user interface for the extension action.
+---
 
-### Local Setup
+## AI News (32)
 
-1.  Make changes to the code (e.g., `content.js` logic).
-2.  Go to `chrome://extensions/`.
-3.  Find "Follow Exporter" and click the **Refresh** (circular arrow) icon.
-4.  Reload the Follow.is web page to apply changes.
+### Article Title
+- Source: Hugging Face Blog
+- Time: 1/27/2026, 10:00:00 AM
+- Link: https://example.com/article
+- Summary: AI-generated summary of the article...
+
+...
+```
+
+## Requirements
+
+- Chrome browser
+- Logged in to Folo (app.folo.is)
+
+## How It Works
+
+The extension calls Folo's API directly with your session cookie:
+
+```javascript
+POST https://api.folo.is/entries
+Body: { limit: 100, view: -1, read: false }
+```
+
+This approach:
+- Fetches all unread articles (no scroll limit)
+- Doesn't trigger read status (API read ≠ page view)
+- Gets complete data including AI summaries
 
 ## License
 
-MIT License. Feel free to fork and modify!
+MIT

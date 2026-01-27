@@ -1,99 +1,59 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
-  <title>Follow Exporter</title>
-  <style>
-    body {
-      width: 260px;
-      padding: 16px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background-color: #ffffff;
-      color: #333;
-      margin: 0;
-    }
-
-    h2 {
-      margin: 0 0 12px 0;
-      font-size: 16px;
-      font-weight: 600;
-      text-align: center;
-      color: #1a1a1a;
-    }
-
-    .control-group {
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 14px;
-    }
-
-    input[type="checkbox"] {
-      margin-right: 8px;
-      cursor: pointer;
-    }
-
-    label {
-      cursor: pointer;
-      user-select: none;
-    }
-
-    button {
-      width: 100%;
-      padding: 10px;
-      cursor: pointer;
-      background-color: #000;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-size: 14px;
-      font-weight: 500;
-      transition: background-color 0.2s;
-    }
-
-    button:hover {
-      background-color: #333;
-    }
-
-    button:active {
-      transform: scale(0.98);
-    }
-
-    #status {
-      margin-top: 12px;
-      font-size: 13px;
-      text-align: center;
-      min-height: 18px;
-      /* Prevent layout shift */
-    }
-
-    .success {
-      color: #10b981;
-    }
-
-    .error {
-      color: #ef4444;
-    }
-  </style>
+  <title>Folo Exporter</title>
+  <link rel="stylesheet" href="popup.css">
 </head>
-
 <body>
-  <h2>Follow Exporter</h2>
+  <div class="container">
+    <h1>Folo Exporter</h1>
 
-  <div class="control-group">
-    <label>
-      <input type="checkbox" id="onlyUnread" checked>
-      Only Unread Articles
-    </label>
+    <div id="status-bar" class="status-bar">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">Checking connection...</span>
+    </div>
+
+    <button id="fetch-btn" class="btn btn-primary" disabled>
+      <span id="fetch-btn-text">Fetch Unread Articles</span>
+    </button>
+
+    <div id="progress" class="progress hidden">
+      <div class="progress-text">Fetching... <span id="progress-count">0</span> articles</div>
+    </div>
+
+    <div id="results" class="results hidden">
+      <div class="results-header">
+        <span id="total-count">0</span> unread articles
+      </div>
+      <div id="category-list" class="category-list"></div>
+    </div>
+
+    <div id="export-section" class="export-section hidden">
+      <div class="export-options">
+        <label class="radio-label">
+          <input type="radio" name="format" value="grouped" checked>
+          Group by category
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="format" value="flat">
+          Flat list
+        </label>
+      </div>
+
+      <div class="export-buttons">
+        <button id="copy-btn" class="btn btn-secondary">
+          Copy to Clipboard
+        </button>
+        <button id="download-btn" class="btn btn-secondary">
+          Download .md
+        </button>
+      </div>
+    </div>
+
+    <div id="message" class="message hidden"></div>
   </div>
-
-  <button id="exportBtn">Copy to Clipboard</button>
-
-  <div id="status"></div>
 
   <script src="popup.js"></script>
 </body>
-
 </html>

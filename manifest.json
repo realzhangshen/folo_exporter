@@ -1,35 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "Follow Exporter",
-  "version": "1.0",
-  "description": "Export unread or all articles from Follow.is (app.folo.is) to Markdown list format.",
+  "name": "Folo Exporter",
+  "version": "2.0",
+  "description": "Export all unread articles from Folo (app.folo.is) to Markdown format via API.",
   "permissions": [
-    "activeTab",
-    "scripting"
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://api.folo.is/*"
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Export RSS Links"
-  },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://app.folo.is/*",
-        "https://folo.is/*"
-      ],
-      "js": [
-        "content.js"
-      ]
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "injected.js"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ]
+    "default_title": "Folo Exporter"
+  }
 }
