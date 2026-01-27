@@ -20,6 +20,7 @@ const statusText = document.getElementById('status-text');
 const fetchBtn = document.getElementById('fetch-btn');
 const fetchBtnText = document.getElementById('fetch-btn-text');
 const clearBtn = document.getElementById('clear-btn');
+const markReadBtn = document.getElementById('mark-read-btn');
 const cacheStatus = document.getElementById('cache-status');
 const cacheText = document.getElementById('cache-text');
 const progress = document.getElementById('progress');
@@ -31,6 +32,10 @@ const exportSection = document.getElementById('export-section');
 const copyBtn = document.getElementById('copy-btn');
 const downloadBtn = document.getElementById('download-btn');
 const message = document.getElementById('message');
+const confirmDialog = document.getElementById('confirm-dialog');
+const dialogMessage = document.getElementById('dialog-message');
+const dialogCancel = document.getElementById('dialog-cancel');
+const dialogConfirm = document.getElementById('dialog-confirm');
 
 // Cache Module
 const Cache = {
@@ -111,6 +116,27 @@ const UI = {
   setExportEnabled(enabled) {
     copyBtn.disabled = !enabled;
     downloadBtn.disabled = !enabled;
+  },
+
+  setMarkAsReadEnabled(enabled) {
+    markReadBtn.disabled = !enabled;
+  },
+
+  setMarkAsReadLoading(isLoading) {
+    if (isLoading) {
+      markReadBtn.disabled = true;
+      markReadBtn.textContent = '标记中...';
+    } else {
+      markReadBtn.disabled = false;
+      markReadBtn.textContent = 'Mark as Read';
+    }
+  },
+
+  setMarkAsReadSuccess(count) {
+    markReadBtn.textContent = `✓ 已标记 ${count} 篇`;
+    setTimeout(() => {
+      markReadBtn.textContent = 'Mark as Read';
+    }, 2000);
   }
 };
 
@@ -141,6 +167,7 @@ async function init() {
     UI.showCacheStatus(cached.count, cached.fetchTime);
     UI.showClearButton();
     UI.setExportEnabled(true);
+    UI.setMarkAsReadEnabled(true);
   }
 
   // Event listeners
@@ -148,6 +175,14 @@ async function init() {
   clearBtn.addEventListener('click', handleClear);
   copyBtn.addEventListener('click', handleCopy);
   downloadBtn.addEventListener('click', handleDownload);
+  markReadBtn.addEventListener('click', handleMarkAsRead);
+  dialogCancel.addEventListener('click', hideConfirmDialog);
+  dialogConfirm.addEventListener('click', confirmMarkAsRead);
+  confirmDialog.addEventListener('click', (e) => {
+    if (e.target === confirmDialog) {
+      hideConfirmDialog();
+    }
+  });
 }
 
 async function checkConnection() {
@@ -203,6 +238,7 @@ async function handleFetch() {
     UI.showCacheStatus(articles.length, Date.now());
     UI.showClearButton();
     UI.setExportEnabled(true);
+    UI.setMarkAsReadEnabled(true);
 
   } catch (e) {
     console.error('Fetch error:', e);
@@ -217,6 +253,8 @@ async function handleFetch() {
       exportSection.classList.remove('hidden');
       UI.showCacheStatus(cacheData.count, cacheData.fetchTime);
       UI.showClearButton();
+      UI.setExportEnabled(true);
+      UI.setMarkAsReadEnabled(true);
     }
 
     showMessage(`Error: ${e.message}`, 'error');
@@ -232,6 +270,7 @@ async function handleClear() {
   UI.hideCacheStatus();
   UI.hideClearButton();
   UI.setExportEnabled(false);
+  UI.setMarkAsReadEnabled(false);
   showMessage('Cache cleared', 'success');
 }
 
@@ -430,6 +469,90 @@ function handleDownload() {
 
   URL.revokeObjectURL(url);
   showMessage(`Downloaded ${filename}`, 'success');
+}
+
+// Mark as Read Functions
+function showConfirmDialog() {
+  dialogMessage.textContent = `将 ${articles.length} 篇文章标记为已读`;
+  confirmDialog.classList.remove('hidden');
+}
+
+function hideConfirmDialog() {
+  confirmDialog.classList.add('hidden');
+}
+
+function handleMarkAsRead() {
+  if (articles.length === 0) return;
+  showConfirmDialog();
+}
+
+async function confirmMarkAsRead() {
+  hideConfirmDialog();
+  UI.setMarkAsReadLoading(true);
+
+  try {
+    const result = await markAsRead();
+    if (result.success) {
+      UI.setMarkAsReadSuccess(result.count);
+      showMessage(`✓ 已标记 ${result.count} 篇文章为已读`, 'success');
+    } else {
+      showMessage(`标记失败：${result.error}`, 'error');
+    }
+  } catch (e) {
+    console.error('Mark as read error:', e);
+    showMessage(`标记失败：${e.message}`, 'error');
+  } finally {
+    UI.setMarkAsReadLoading(false);
+  }
+}
+
+async function markAsRead() {
+  // Get all entry IDs (filter out null IDs)
+  const entryIds = articles
+    .map(a => a.id)
+    .filter(id => id != null);
+
+  if (entryIds.length === 0) {
+    return { success: false, error: '没有有效的文章 ID' };
+  }
+
+  try {
+    // Try batch API first
+    // NOTE: API endpoint to be verified via browser DevTools
+    const response = await fetch(`${API_BASE}/entries`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        entryIds: entryIds,
+        read: true
+      })
+    });
+
+    if (response.ok) {
+      return { success: true, count: entryIds.length };
+    }
+
+    // If batch fails, try alternative endpoint
+    const altResponse = await fetch(`${API_BASE}/entries/read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        entryIds: entryIds
+      })
+    });
+
+    if (altResponse.ok) {
+      return { success: true, count: entryIds.length };
+    }
+
+    const errorText = await response.text();
+    return { success: false, error: errorText || 'API 请求失败' };
+
+  } catch (e) {
+    return { success: false, error: e.message || '网络连接失败' };
+  }
 }
 
 function showMessage(text, type) {

@@ -39,6 +39,12 @@
     </div>
 
     <div id="export-section" class="export-section hidden">
+      <div class="export-buttons">
+        <button id="mark-read-btn" class="btn btn-accent" disabled>
+          Mark as Read
+        </button>
+      </div>
+
       <div class="export-options">
         <label class="radio-label">
           <input type="radio" name="format" value="grouped" checked>
@@ -57,6 +63,19 @@
         <button id="download-btn" class="btn btn-secondary">
           Download .md
         </button>
+      </div>
+    </div>
+
+    <!-- Confirmation Dialog -->
+    <div id="confirm-dialog" class="dialog hidden">
+      <div class="dialog-content">
+        <h3>确认标记已读</h3>
+        <p id="dialog-message">将 0 篇文章标记为已读</p>
+        <p class="dialog-warning">此操作不可撤销</p>
+        <div class="dialog-buttons">
+          <button id="dialog-cancel" class="btn btn-secondary">取消</button>
+          <button id="dialog-confirm" class="btn btn-primary">确认标记</button>
+        </div>
       </div>
     </div>
 
