@@ -84,8 +84,8 @@ Add a JSON export format to the Folo Exporter Chrome extension, allowing users t
 
 ### Download Button
 - Downloads as `.json` file
-- Filename format: `folo-export-YYYY-MM-DD.json`
-- Example: `folo-export-2026-02-03.json`
+- Filename format: `folo-export-YYYY-MM-DD-HH-mm.json`
+- Example: `folo-export-2026-02-03-14-30.json`
 
 ## Implementation
 

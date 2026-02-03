@@ -519,14 +519,20 @@ async function handleCopy() {
 function handleDownload() {
   const format = document.getElementById('format-select').value;
   const content = generateExport();
-  const now = new Date().toISOString().split('T')[0];
+
+  // Generate filename with hour and minute
+  const now = new Date();
+  const date = now.toISOString().split('T')[0];
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const timestamp = `${date}-${hours}-${minutes}`;
 
   let filename, mimeType;
   if (format === 'json') {
-    filename = `folo-export-${now}.json`;
+    filename = `folo-export-${timestamp}.json`;
     mimeType = 'application/json';
   } else {
-    filename = `folo-export-${now}.md`;
+    filename = `folo-export-${timestamp}.md`;
     mimeType = 'text/markdown';
   }
 
