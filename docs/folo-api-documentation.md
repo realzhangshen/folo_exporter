@@ -1,216 +1,118 @@
-# Folo API 文档
+# Folo API 文档（面向本仓库）
 
-> 基于对 https://github.com/RSSNext/Folo 源码的分析
+> 本文档用于指导本仓库内的 AI Agent，不是 Folo 官方 API 文档。
 >
-> 分析日期: 2026-01-27
+> 更新时间: 2026-02-08
 >
-> 状态: ✅ 已验证可用
+> 证据来源:
+> - 本仓库代码: `popup.js`, `cli/folo-cli.js`
+> - 历史分析文档（已去除与现状冲突的结论）
 
 ## 1. 基础信息
 
 | 项目 | 值 |
 |------|-----|
-| **后端 API** | `https://api.follow.is` |
-| **前端 API** | `https://api.folo.is` (CORS 允许扩展访问) |
-| **Web URL** | `https://app.folo.is` |
-| **认证方式** | Cookies (`credentials: 'include'`) |
-| **请求格式** | JSON |
-| **响应格式** | JSON |
+| Web URL | `https://app.folo.is` |
+| API Base（默认） | `https://api.folo.is` |
+| API Base（兼容尝试） | `https://api.follow.is` |
+| 认证方式 | Cookie 会话 |
+| 请求格式 | JSON |
+| 响应格式 | JSON |
 
-### CORS 问题
+注意：
+1. 扩展侧与 CLI 侧都依赖已登录会话。
+2. 没有内置长期 token 方案，主要走 Cookie。
 
-**重要**: `api.follow.is` 的 CORS 配置只允许 `https://folo.is` 访问，不允许浏览器扩展直接访问。
+## 2. 已在代码中稳定使用的接口
 
-对于浏览器扩展，必须使用 `api.folo.is`，它的 CORS 配置允许扩展访问。
+### 2.1 获取未读文章
 
-| 场景 | 使用的 API |
-|------|-----------|
-| 浏览器扩展 | `https://api.folo.is` ✅ |
-| Folo 网页内 | `https://api.follow.is` |
+- 方法: `POST /entries`
+- Base: `https://api.folo.is`
+- 用途: 抓取 inbox 未读
 
-## 2. 已验证可用的端点
+请求体（核心字段）：
 
-### 获取文章列表
-
-**端点**: `POST https://api.folo.is/entries` ✅
-
-**请求参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `limit` | number | 否 | 每页数量，最大 100 |
-| `read` | boolean | 否 | 过滤已读状态，`false` 获取未读 |
-| `view` | number | 是 | FeedViewType，`-1` 表示 inbox |
-| `publishedAfter` | string | 否 | 分页游标，ISO 8601 时间戳 |
-
-**请求示例**:
-```javascript
-const response = await fetch('https://api.folo.is/entries', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  credentials: 'include',
-  body: JSON.stringify({
-    limit: 100,
-    read: false,
-    view: -1,
-    publishedAfter: '2025-01-01T00:00:00Z'
-  })
-});
-```
-
-**响应结构**:
 ```json
 {
-  "data": [
-    {
-      "entries": {
-        "id": "entry-id-xxx",
-        "title": "文章标题",
-        "url": "https://example.com/article",
-        "publishedAt": "2025-01-27T10:00:00Z",
-        "insertedAt": "2025-01-27T11:00:00Z",
-        "summary": "文章摘要",
-        "read": false
-      },
-      "feeds": {
-        "id": "feed-id-xxx",
-        "title": "订阅源名称",
-        "type": "rss"
-      },
-      "subscriptions": {
-        "category": "分类名称"
-      }
-    }
-  ]
+  "limit": 100,
+  "view": -1,
+  "read": false,
+  "publishedAfter": "optional-iso-time"
 }
 ```
 
-### 分页逻辑 (已验证 ✅)
+字段说明：
+- `limit`: 每批数量，代码中限制不超过 `100`
+- `view: -1`: inbox
+- `read: false`: 仅未读
+- `publishedAfter`: 分页游标（取上一页最后一条的 `entries.publishedAt`）
 
-使用 `publishedAfter` 作为游标：
+### 2.2 会话检查
 
-1. 第一次请求不传 `publishedAfter`，获取最新文章
-2. 获取响应中最后一条记录的 `publishedAt` 时间戳
-3. 下一次请求传入该时间戳作为 `publishedAfter`
+- 方法: `POST /entries`
+- Body: `{ "limit": 1, "view": -1 }`
+- 目的: 用最小请求验证登录态
 
-**关键代码**:
-```javascript
-let publishedAfter = null;
+本仓库中：
+- 扩展 `checkConnection()` 使用此逻辑
+- CLI `check-auth` 使用同样逻辑
 
-while (hasMore) {
-  const body = { limit: 100, view: -1, read: false };
-  if (publishedAfter) {
-    body.publishedAfter = publishedAfter;
-  }
+## 3. 标记已读能力（重要）
 
-  const response = await fetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    body: JSON.stringify(body)
-  });
+旧文档曾写“不可用”，该结论对当前仓库已过期。
 
-  const entries = result.data || [];
+当前代码行为（`popup.js -> markAsRead()`）：
+1. 按顺序尝试 `POST https://api.folo.is/reads`，Body `{ entryIds, isInbox: false }`
+2. 再尝试 `POST https://api.folo.is/reads`，Body `{ entryIds }`
+3. 再尝试 `POST https://api.follow.is/reads`，Body `{ entryIds, isInbox: false }`
+4. 再尝试 `POST https://api.follow.is/reads`，Body `{ entryIds }`
+5. 最后 fallback 到 `POST https://api.folo.is/reads/markAsRead`
 
-  // 更新游标
-  const lastEntry = entries[entries.length - 1];
-  if (lastEntry?.entries?.publishedAt) {
-    publishedAfter = lastEntry.entries.publishedAt;
-  }
+行为约定：
+- 只要任一请求 `response.ok` 即视为成功。
+- 若所有尝试均为 `404`，返回“环境未开放接口”的错误。
+- 因账号/环境差异，该能力可能可用也可能不可用，Agent 不应做绝对假设。
 
-  // 如果返回少于 100 条，说明已到末尾
-  if (entries.length < 100) {
-    hasMore = false;
-  }
+## 4. 分页与去重策略（当前实现）
+
+1. 首次请求不带 `publishedAfter`
+2. 每轮取最后一条 `publishedAt` 作为下一轮游标
+3. 若本轮新增文章数为 `0`，立即停止（防死循环）
+4. 若返回数量 `< 100`，停止
+5. 安全上限：最多 50 请求（可在 CLI 中配置）
+6. 去重键：`entries.id`
+
+## 5. 数据结构（导出层）
+
+本仓库统一导出字段：
+
+```json
+{
+  "id": "entry-id-or-null",
+  "title": "Untitled if missing",
+  "url": "",
+  "publishedAt": "ISO or null",
+  "insertedAt": "ISO or null",
+  "summary": "",
+  "feedTitle": "Unknown if missing",
+  "category": "Uncategorized if missing"
 }
 ```
 
-## 3. 标记为已读 (不可用 ⛔)
+## 6. Agent 注意事项
 
-**状态**: `api.folo.is` 前端 API **不支持**批量标记已读功能。
+1. 不要再引用“标记已读必定不可用”的旧结论。
+2. 标记已读前，先判断是否有可用 `entryIds`。
+3. 抓取流程推荐先做 `check-auth`，再做 `fetch`。
+4. 认证失败优先判定为会话失效，而不是接口参数错误。
+5. 优先使用 JSON 导出给下游 Agent 消费。
 
-经过测试，以下端点均返回 404 Not Found：
+## 7. 代码锚点
 
-| 端点 | 方法 | 状态 |
-|------|------|------|
-| `/reads/markAsRead` | POST | ❌ 404 |
-| `/entries` | PATCH | ❌ 404 |
-| `/entries/read` | POST | ❌ 404 |
-
-### 后端 API
-
-后端 API (`api.follow.is`) 可能支持标记已读功能，但该 API 的 CORS 配置不允许浏览器扩展直接访问。
-
-### 变通方案
-
-如需标记已读功能，用户需要：
-1. 直接在 Folo 网页版 (app.folo.is) 中操作
-2. 使用 Folo 官方移动应用
-
-## 4. 其他可能有用的端点 (未测试)
-
-### 标记为未读
-
-```
-POST /reads/markAsUnread
-
-{ entryId: "xxx", isInbox: false }
-```
-
-### 全部标记已读
-
-```
-POST /reads/markAllAsRead
-
-{ view: -1, feedId?: "xxx", ... }
-```
-
-### 获取完整内容
-
-```
-POST /entries
-{ withContent: true, ... }
-```
-
-### 收藏/取消收藏
-
-端点未知（可能在 `/collections` 或 `/stars`）
-
-### 订阅管理
-
-可能涉及的端点：
-- `/subscriptions` - 订阅列表
-- `/feeds` - 订阅源管理
-- `/lists` - 列表管理
-
-## 5. FeedViewType 枚举
-
-从源码推断的 view 值：
-
-| 值 | 说明 |
-|----|------|
-| `-1` | Inbox (收件箱) |
-| `0` | Feeds (订阅源) |
-| `1` | Lists (列表) |
-| `2` | 可能是其他视图 |
-
-## 6. 修复历史
-
-### 2026-01-27 修复
-
-**问题**:
-1. 分页代码尝试了太多无效的游标参数
-2. 标记已读端点不可用（前端 API 不支持批量标记已读）
-
-**解决**:
-1. 简化分页，只使用 `publishedAfter` 游标
-2. **禁用标记已读功能** - `api.folo.is` 前端 API 不支持此操作
-
-**验证结果**: ✅ 成功抓取超过 100 篇文章，标记已读功能已禁用
-
-## 7. 源码参考
-
-| 文件路径 | 说明 |
-|----------|------|
-| `packages/internal/store/src/modules/entry/store.ts` | 文章列表 API 调用 |
-| `packages/internal/store/src/modules/unread/store.ts` | 已读/未读标记 API |
-| `packages/internal/shared/src/env.common.ts` | 环境配置 |
+- 扩展抓取入口: `popup.js` -> `fetchAllUnread()`
+- 扩展登录态检查: `popup.js` -> `checkConnection()`
+- 扩展标记已读: `popup.js` -> `markAsRead()`
+- CLI 登录: `cli/folo-cli.js` -> `runLogin()`
+- CLI 鉴权检查: `cli/folo-cli.js` -> `runCheckAuth()`
+- CLI 抓取: `cli/folo-cli.js` -> `runFetch()` / `fetchAllUnread()`
