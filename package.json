@@ -1,0 +1,14 @@
+{
+  "name": "folo-exporter",
+  "version": "2.1.0",
+  "private": true,
+  "description": "Folo unread exporter (Chrome extension + CLI)",
+  "bin": {
+    "folo-exporter": "./cli/folo-cli.js"
+  },
+  "scripts": {
+    "cli": "node ./cli/folo-cli.js",
+    "check-auth": "node ./cli/folo-cli.js check-auth",
+    "fetch": "node ./cli/folo-cli.js fetch"
+  }
+}
