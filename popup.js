@@ -8,6 +8,7 @@ const READ_API_BASES = ['https://api.folo.is', 'https://api.follow.is'];
 const BATCH_SIZE = 100;  // API 强制限制 100
 const API_MAX_LIMIT = 100;
 const CACHE_KEY = 'folo_cache';
+const DEBUG = false;
 
 // State
 let articles = [];
@@ -15,6 +16,12 @@ let seenIds = new Set();
 let markedEntryIds = new Set();
 let cacheData = null;
 let isRefreshing = false;
+
+function debugLog(...args) {
+  if (DEBUG) {
+    console.log(...args);
+  }
+}
 
 // DOM Elements
 const statusDot = document.getElementById('status-dot');
@@ -300,7 +307,7 @@ async function fetchAllUnread() {
       body.publishedAfter = publishedAfter;
     }
 
-    console.log(`[Folo Exporter] Request #${requestCount}:`, JSON.stringify(body, null, 2));
+    debugLog(`[Folo Exporter] Request #${requestCount}:`, JSON.stringify(body, null, 2));
 
     const response = await fetch(`${API_BASE}/entries`, {
       method: 'POST',
@@ -318,13 +325,13 @@ async function fetchAllUnread() {
     const fullResult = await response.json();
 
     // 调试：打印完整的响应结构（不仅仅是 data），寻找 hidden cursor
-    console.log(`[Folo Exporter] Response #${requestCount} FULL META:`, fullResult);
+    debugLog(`[Folo Exporter] Response #${requestCount} FULL META:`, fullResult);
 
     const entries = fullResult.data || [];
-    console.log(`[Folo Exporter] Got ${entries.length} entries`);
+    debugLog(`[Folo Exporter] Got ${entries.length} entries`);
 
     if (entries.length === 0) {
-      console.log(`[Folo Exporter] No more entries, stopping`);
+      debugLog('[Folo Exporter] No more entries, stopping');
       hasMore = false;
     } else {
       let newCount = 0;
@@ -349,7 +356,7 @@ async function fetchAllUnread() {
         newCount++;
       }
 
-      console.log(`[Folo Exporter] Added ${newCount} new articles (total: ${articles.length})`);
+      debugLog(`[Folo Exporter] Added ${newCount} new articles (total: ${articles.length})`);
       progressCount.textContent = articles.length;
 
       // 如果全是重复的，说明分页参数没生效，必须强制停止，防止死循环
@@ -363,15 +370,11 @@ async function fetchAllUnread() {
       const lastEntry = entries[entries.length - 1];
       if (lastEntry?.entries) {
         publishedAfter = lastEntry.entries.publishedAt;
-        console.log(`[Folo Exporter] Next publishedAfter: ${publishedAfter}`);
+        debugLog(`[Folo Exporter] Next publishedAfter: ${publishedAfter}`);
       }
 
-      // 修正：API 强制最大 100 条。
-      // 所以只有当返回数量明显少于 100 时，才认为是最后一页。
-      // 如果返回了 100 条，说明可能还有更多，必须继续请求。
-      const REAL_API_LIMIT = 100;
-      if (entries.length < REAL_API_LIMIT) {
-        console.log(`[Folo Exporter] Got ${entries.length} < ${REAL_API_LIMIT}, end of list reached`);
+      if (entries.length < API_MAX_LIMIT) {
+        debugLog(`[Folo Exporter] Got ${entries.length} < ${API_MAX_LIMIT}, end of list reached`);
         hasMore = false;
       }
     }
@@ -382,7 +385,7 @@ async function fetchAllUnread() {
     }
   }
 
-  console.log(`[Folo Exporter] Complete: ${articles.length} articles`);
+  debugLog(`[Folo Exporter] Complete: ${articles.length} articles`);
 }
 
 function displayResults() {

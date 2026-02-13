@@ -10,5 +10,8 @@
     "cli": "node ./cli/folo-cli.js",
     "check-auth": "node ./cli/folo-cli.js check-auth",
     "fetch": "node ./cli/folo-cli.js fetch"
+  },
+  "dependencies": {
+    "playwright": "^1.58.2"
   }
 }

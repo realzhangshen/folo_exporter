@@ -206,6 +206,7 @@ async function fetchAllUnread({ apiBase, cookieHeader, batchSize, maxRequests })
   let hasMore = true;
   let requestCount = 0;
   let publishedAfter = null;
+  const requestLimit = Math.min(batchSize, API_MAX_LIMIT);
 
   const seenIds = new Set();
   const articles = [];
@@ -217,7 +218,7 @@ async function fetchAllUnread({ apiBase, cookieHeader, batchSize, maxRequests })
     }
 
     const body = {
-      limit: Math.min(batchSize, API_MAX_LIMIT),
+      limit: requestLimit,
       view: -1,
       read: false
     };
@@ -256,9 +257,13 @@ async function fetchAllUnread({ apiBase, cookieHeader, batchSize, maxRequests })
       publishedAfter = lastPublishedAt;
     }
 
-    if (entries.length < API_MAX_LIMIT) {
+    if (entries.length < requestLimit) {
       hasMore = false;
     }
+  }
+
+  if (requestCount >= maxRequests) {
+    console.warn(`Reached max-requests limit (${maxRequests}), stopping pagination.`);
   }
 
   return articles;
