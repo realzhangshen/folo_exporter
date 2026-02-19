@@ -251,6 +251,13 @@ folo-exporter fetch --format json --state "${HOME}/.folo-exporter/storage-state.
 - 命令与参数速查：见本文“AI Agent 使用手册（重点）”章节
 - 历史速查文档（已归档）：`docs/archive/ai-agent-reference.md`
 
+## 代码注释导览
+
+以下源码已补充详细流程注释，便于维护：
+
+- `cli/folo-cli.js`：命令解析、认证优先级、分页抓取、导出契约、退出码语义
+- `popup.js`：扩展端状态管理、缓存策略、分页防重、导出与“标记已读”兼容回退
+
 ## 许可证
 
 MIT
