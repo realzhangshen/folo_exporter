@@ -1,6 +1,10 @@
 /**
  * Folo Exporter - Popup Script
  * Fetches unread articles from Folo API and exports to Markdown or JSON
+ *
+ * This file is browser-extension UI logic and intentionally keeps:
+ * - Fetch + pagination behavior aligned with CLI output schema.
+ * - Optional mark-as-read behavior best-effort with endpoint fallbacks.
  */
 
 const API_BASE = 'https://api.folo.is';
@@ -50,6 +54,7 @@ const dialogConfirm = document.getElementById('dialog-confirm');
 // Cache Module
 const Cache = {
   async save(articles) {
+    // Persist recent fetch result so popup reopen is instant.
     const data = {
       articles,
       fetchTime: Date.now(),
@@ -80,6 +85,7 @@ const Cache = {
   },
 
   isStale(timestamp) {
+    // Cache staleness controls badge style only; does not block export.
     const STALE_THRESHOLD = 30 * 60 * 1000; // 30 minutes
     return Date.now() - timestamp > STALE_THRESHOLD;
   }
@@ -166,7 +172,7 @@ async function init() {
     statusText.textContent = 'Please login to Folo first';
   }
 
-  // Load cached data
+  // Hydrate UI from cache first, then allow manual refresh.
   const cached = await Cache.load();
   if (cached && cached.articles.length > 0) {
     cacheData = cached;
@@ -197,6 +203,7 @@ async function init() {
 }
 
 async function checkConnection() {
+  // Uses same endpoint shape as CLI check-auth for consistency.
   try {
     const response = await fetch(`${API_BASE}/entries`, {
       method: 'POST',
@@ -222,14 +229,14 @@ async function handleFetch() {
   UI.hideCacheStatus();
   UI.hideClearButton();
 
-  // Show progress
+  // Show progress while fetching all pages.
   isRefreshing = true;
   UI.setRefreshing(true);
   progress.classList.remove('hidden');
   progressCount.textContent = '0';
 
   try {
-    // Fetch all unread articles
+    // Fetch all unread pages with duplicate protection.
     await fetchAllUnread();
 
     // Save to cache
@@ -302,7 +309,7 @@ async function fetchAllUnread() {
       read: false
     };
 
-    // 使用 publishedAfter 作为分页游标
+    // `publishedAfter` acts as pagination cursor in Folo API.
     if (publishedAfter) {
       body.publishedAfter = publishedAfter;
     }
@@ -321,7 +328,7 @@ async function fetchAllUnread() {
       throw new Error('Failed to fetch articles');
     }
 
-    // 1. 获取完整 JSON 以寻找分页线索
+    // Parse full response so debug mode can inspect hidden pagination metadata.
     const fullResult = await response.json();
 
     // 调试：打印完整的响应结构（不仅仅是 data），寻找 hidden cursor
@@ -359,14 +366,14 @@ async function fetchAllUnread() {
       debugLog(`[Folo Exporter] Added ${newCount} new articles (total: ${articles.length})`);
       progressCount.textContent = articles.length;
 
-      // 如果全是重复的，说明分页参数没生效，必须强制停止，防止死循环
+      // All-duplicate page usually means cursor stalled; stop to avoid loops.
       if (newCount === 0) {
         console.warn(`[Folo Exporter] Pagination failed: got 100% duplicates. Stopping to avoid infinite loop.`);
         hasMore = false;
         break;
       }
 
-      // 准备下一页的游标
+      // Move cursor forward using last entry's publish time.
       const lastEntry = entries[entries.length - 1];
       if (lastEntry?.entries) {
         publishedAfter = lastEntry.entries.publishedAt;
@@ -379,7 +386,7 @@ async function fetchAllUnread() {
       }
     }
 
-    if (requestCount >= 50) { // 防止失控
+    if (requestCount >= 50) { // Safety guard against runaway loops
       console.warn(`[Folo Exporter] Safety limit reached (50 requests)`);
       hasMore = false;
     }
@@ -426,6 +433,7 @@ function generateExport() {
 function generateJSON() {
   const now = new Date();
 
+  // Keep JSON shape in sync with CLI for downstream parser consistency.
   const exportData = {
     exportTime: now.toISOString(),
     exportTimeFormatted: now.toLocaleString(),
@@ -516,6 +524,7 @@ async function handleCopy() {
   try {
     await navigator.clipboard.writeText(content);
 
+    // Auto mark-as-read is optional and non-blocking for export success.
     if (autoMarkRead.checked) {
       const markResult = await markExportedArticles({ withLoading: true });
       if (markResult.success) {
@@ -541,7 +550,7 @@ async function handleDownload() {
   const format = document.getElementById('format-select').value;
   const content = generateExport();
 
-  // Generate filename with hour and minute
+  // Include HH-mm to avoid clobbering files from same day.
   const now = new Date();
   const date = now.toISOString().split('T')[0];
   const hours = String(now.getHours()).padStart(2, '0');
@@ -629,6 +638,7 @@ async function markExportedArticles({ withLoading = false } = {}) {
 
   try {
     const result = await markAsRead();
+    // Update local marker set so repeated clicks don't re-submit same IDs.
     if (result.success && result.count > 0) {
       result.entryIds.forEach(id => markedEntryIds.add(id));
       await refreshFoloWebTabs();
@@ -650,6 +660,7 @@ async function refreshFoloWebTabs() {
   if (!chrome.tabs || !chrome.tabs.query) return;
 
   try {
+    // Refresh opened web app tabs so inbox reflects mark-as-read state.
     const tabs = await chrome.tabs.query({});
     const foloTabs = tabs.filter(tab =>
       typeof tab.url === 'string' && tab.url.startsWith('https://app.folo.is')
@@ -695,8 +706,8 @@ async function markAsRead() {
     return { success: true, count: 0, entryIds: [] };
   }
 
-  // Follow 官方 SDK 路由: POST /reads
-  // 依次尝试 api.folo.is 与 api.follow.is，兼容不同部署。
+  // Prefer official SDK-style route first, then keep legacy fallback.
+  // Try both api domains to support environment differences.
   const endpoints = [];
   READ_API_BASES.forEach((base) => {
     endpoints.push({
@@ -710,7 +721,7 @@ async function markAsRead() {
       body: { entryIds }
     });
   });
-  // Legacy guess kept as last fallback
+  // Legacy endpoint kept as final compatibility fallback.
   endpoints.push({
     url: `${API_BASE}/reads/markAsRead`,
     method: 'POST',
@@ -746,6 +757,7 @@ async function markAsRead() {
     }
   }
 
+  // Distinguish "feature unavailable" (all 404) from generic request failure.
   const all404 = failures.length > 0 && failures.every(f => f.status === 404);
   if (all404) {
     return {
