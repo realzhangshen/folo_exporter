@@ -248,7 +248,8 @@ folo-exporter fetch --format json --state "${HOME}/.folo-exporter/storage-state.
 ## Agent 文档入口
 
 - API 现状与行为约定：`docs/folo-api-documentation.md`
-- 命令与参数速查：`docs/ai-agent-reference.md`
+- 命令与参数速查：见本文“AI Agent 使用手册（重点）”章节
+- 历史速查文档（已归档）：`docs/archive/ai-agent-reference.md`
 
 ## 许可证
 
