@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * Folo Exporter CLI
+ * Folo Exporter 命令行入口。
  *
- * Cross-repo contract:
- * - `fetch --format json` output is consumed by daily_report.
- * - Authentication check exit codes are consumed by automation scripts.
+ * 跨仓库契约说明：
+ * 1) `fetch --format json` 的输出会被 `daily_report` 直接消费；
+ * 2) `check-auth` 的退出码会被根目录自动化脚本用于分支判断；
+ * 3) 因此本文件的“输出结构 + 退出语义”属于稳定接口，修改需谨慎。
  */
 
 const fs = require('node:fs');
@@ -117,7 +118,7 @@ function validateCommandAndOptions(command, options) {
 }
 
 function resolveStatePath(rawPath) {
-  // Keep default state path stable for automation scripts.
+  // 默认 state 路径需保持稳定，便于自动化脚本零配置复用。
   if (!rawPath) {
     return path.join(os.homedir(), '.folo-exporter', 'storage-state.json');
   }
@@ -178,7 +179,7 @@ function buildCookieHeaderFromStorageState(storageState, urlString) {
   const url = new URL(urlString);
   const nowSec = Math.floor(Date.now() / 1000);
 
-  // Filter cookies by domain/path/expiry similarly to browser request rules.
+  // 按浏览器规则过滤 cookie（域名/路径/过期时间），避免带入无效会话。
   const pairs = storageState.cookies
     .filter((cookie) => {
       if (!cookie || !cookie.name) return false;
@@ -195,7 +196,7 @@ function buildCookieHeaderFromStorageState(storageState, urlString) {
 }
 
 function normalizeArticle(entry) {
-  // Normalize API payload into a stable schema expected downstream.
+  // 将 API 原始结构归一化为稳定 schema，供下游长期消费。
   return {
     id: entry.entries?.id || null,
     title: entry.entries?.title || 'Untitled',
@@ -209,7 +210,7 @@ function normalizeArticle(entry) {
 }
 
 async function requestEntries({ apiBase, cookieHeader, body }) {
-  // Keep response parsing tolerant so auth/fetch can surface raw server errors.
+  // 响应解析保持“尽量容错”，确保可把服务端原始错误暴露给调用方。
   const response = await fetch(`${apiBase}/entries`, {
     method: 'POST',
     headers: {
@@ -237,7 +238,7 @@ async function requestEntries({ apiBase, cookieHeader, body }) {
 }
 
 async function checkAuth({ apiBase, cookieHeader }) {
-  // Minimal request used purely for session validity check.
+  // 仅用最小请求验证会话有效性，减少不必要数据传输。
   const result = await requestEntries({
     apiBase,
     cookieHeader,
@@ -262,7 +263,7 @@ async function checkAuth({ apiBase, cookieHeader }) {
 async function fetchAllUnread({ apiBase, cookieHeader, batchSize, maxRequests }) {
   let hasMore = true;
   let requestCount = 0;
-  // `publishedAfter` acts as cursor for API pagination.
+  // `publishedAfter` 是分页游标，指向“上一页最后一条”的发布时间。
   let publishedAfter = null;
   const requestLimit = Math.min(batchSize, API_MAX_LIMIT);
 
@@ -271,7 +272,7 @@ async function fetchAllUnread({ apiBase, cookieHeader, batchSize, maxRequests })
 
   while (hasMore) {
     requestCount += 1;
-    // Guardrail for stuck pagination loops / API regressions.
+    // 安全护栏：防止接口异常或游标失效导致无限分页循环。
     if (requestCount > maxRequests) {
       break;
     }
@@ -296,7 +297,7 @@ async function fetchAllUnread({ apiBase, cookieHeader, batchSize, maxRequests })
       continue;
     }
 
-    // Deduplicate by entry id to avoid repeated pages creating duplicates.
+    // 按 entry id 去重，防止翻页重叠导致重复记录。
     let newCount = 0;
     for (const rawEntry of entries) {
       const article = normalizeArticle(rawEntry);
@@ -312,7 +313,7 @@ async function fetchAllUnread({ apiBase, cookieHeader, batchSize, maxRequests })
       continue;
     }
 
-    // Cursor is taken from the last item in current page.
+    // 下一页游标取当前页最后一条，保持与接口分页语义一致。
     const lastPublishedAt = entries[entries.length - 1]?.entries?.publishedAt;
     if (lastPublishedAt) {
       publishedAfter = lastPublishedAt;
@@ -331,7 +332,7 @@ async function fetchAllUnread({ apiBase, cookieHeader, batchSize, maxRequests })
 }
 
 function generateJsonExport(articles) {
-  // This JSON envelope is treated as a public contract.
+  // JSON 顶层结构是公开契约（下游直接依赖），字段命名不可随意变更。
   const now = new Date();
   return JSON.stringify({
     exportTime: now.toISOString(),
@@ -397,7 +398,7 @@ function generateMarkdownExport(articles, format) {
 }
 
 function resolveCookieHeader({ cookieArg, statePath, apiBase }) {
-  // Priority order is documented in README and used by automation.
+  // 认证来源优先级（cookie 参数 > 环境变量 > state 文件）与 README 保持一致。
   if (cookieArg) {
     return cookieArg;
   }
@@ -425,7 +426,7 @@ async function runLogin({ statePath, timeoutSec, headless }) {
 
   ensureDirForFile(statePath);
 
-  // Interactive login flow: store authenticated browser state for reuse.
+  // 交互式登录：保存浏览器会话到 state 文件，供后续无人值守任务复用。
   const browser = await chromium.launch({ headless });
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -489,7 +490,7 @@ async function runFetch({ apiBase, statePath, cookieArg, format, out, batchSize,
   }
 
   const cookieHeader = resolveCookieHeader({ cookieArg, statePath, apiBase });
-  // Enforce auth re-check so failed sessions fail early and clearly.
+  // fetch 前强制再次鉴权，确保会话异常能在入口阶段清晰失败。
   const auth = await checkAuth({ apiBase, cookieHeader });
   if (!auth.ok) {
     throw new Error(`Auth invalid (status ${auth.status}). Re-login required.`);
@@ -517,7 +518,7 @@ async function runFetch({ apiBase, statePath, cookieArg, format, out, batchSize,
 async function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
 
-  // Global help shortcut and per-command `--help`.
+  // 同时支持全局 help 与子命令 help，降低误用成本。
   if (!command || command === '--help' || command === '-h' || options.help || options.h) {
     printHelp();
     return;
@@ -565,7 +566,7 @@ main().catch((error) => {
   if (error instanceof CliUsageError) {
     console.error(`Usage error: ${error.message}`);
     console.error('Run "folo-exporter --help" for command usage.');
-    // 64 follows common CLI conventions for command line usage error.
+    // 64 为常见 CLI 用法错误退出码，便于自动化区分“参数错误”和“运行错误”。
     process.exitCode = USAGE_EXIT_CODE;
     return;
   }

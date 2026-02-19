@@ -1,10 +1,11 @@
 /**
- * Folo Exporter - Popup Script
- * Fetches unread articles from Folo API and exports to Markdown or JSON
+ * Folo Exporter 扩展弹窗脚本。
+ * 负责从 Folo API 拉取未读条目，并导出 Markdown / JSON。
  *
- * This file is browser-extension UI logic and intentionally keeps:
- * - Fetch + pagination behavior aligned with CLI output schema.
- * - Optional mark-as-read behavior best-effort with endpoint fallbacks.
+ * 设计约束：
+ * 1) 导出 JSON 结构要与 CLI 保持一致，便于统一下游解析；
+ * 2) “标记已读”属于增强能力，失败不应阻断导出主流程；
+ * 3) 分页与去重策略必须可防止重复数据和死循环。
  */
 
 const API_BASE = 'https://api.folo.is';
@@ -14,7 +15,7 @@ const API_MAX_LIMIT = 100;
 const CACHE_KEY = 'folo_cache';
 const DEBUG = false;
 
-// State
+// 运行时状态（仅当前弹窗会话内存态）
 let articles = [];
 let seenIds = new Set();
 let markedEntryIds = new Set();
@@ -27,7 +28,7 @@ function debugLog(...args) {
   }
 }
 
-// DOM Elements
+// 主要 DOM 引用（集中声明，避免散落查询）
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const fetchBtn = document.getElementById('fetch-btn');
@@ -51,10 +52,10 @@ const dialogMessage = document.getElementById('dialog-message');
 const dialogCancel = document.getElementById('dialog-cancel');
 const dialogConfirm = document.getElementById('dialog-confirm');
 
-// Cache Module
+// 缓存模块：降低弹窗重复打开时的等待成本
 const Cache = {
   async save(articles) {
-    // Persist recent fetch result so popup reopen is instant.
+    // 缓存最近一次抓取结果，弹窗重开时可秒开回显。
     const data = {
       articles,
       fetchTime: Date.now(),
@@ -85,13 +86,13 @@ const Cache = {
   },
 
   isStale(timestamp) {
-    // Cache staleness controls badge style only; does not block export.
+    // 过期只影响 UI 提示样式，不阻止用户导出。
     const STALE_THRESHOLD = 30 * 60 * 1000; // 30 minutes
     return Date.now() - timestamp > STALE_THRESHOLD;
   }
 };
 
-// UI Module
+// UI 控制模块：统一按钮状态与反馈文案
 const UI = {
   showCacheStatus(count, fetchTime) {
     const timeAgo = Cache.formatTime(fetchTime);
@@ -156,11 +157,11 @@ const UI = {
   }
 };
 
-// Initialize
+// 初始化入口
 document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
-  // Check connection
+  // 先探测会话连通性，决定按钮初始可用状态。
   const connected = await checkConnection();
 
   if (connected) {
@@ -172,7 +173,7 @@ async function init() {
     statusText.textContent = 'Please login to Folo first';
   }
 
-  // Hydrate UI from cache first, then allow manual refresh.
+  // 优先从缓存回填界面，减少冷启动等待，再允许手动刷新。
   const cached = await Cache.load();
   if (cached && cached.articles.length > 0) {
     cacheData = cached;
@@ -187,7 +188,7 @@ async function init() {
     UI.setMarkAsReadEnabled(true);
   }
 
-  // Event listeners
+  // 绑定交互事件（抓取/清理/导出/标记已读）
   fetchBtn.addEventListener('click', handleFetch);
   clearBtn.addEventListener('click', handleClear);
   copyBtn.addEventListener('click', handleCopy);
@@ -203,7 +204,7 @@ async function init() {
 }
 
 async function checkConnection() {
-  // Uses same endpoint shape as CLI check-auth for consistency.
+  // 与 CLI check-auth 使用同构请求，保证鉴权行为一致。
   try {
     const response = await fetch(`${API_BASE}/entries`, {
       method: 'POST',
@@ -219,7 +220,7 @@ async function checkConnection() {
 }
 
 async function handleFetch() {
-  // Reset state
+  // 刷新前重置内存态，避免上次结果污染本次渲染。
   articles = [];
   seenIds = new Set();
   markedEntryIds = new Set();
@@ -229,20 +230,20 @@ async function handleFetch() {
   UI.hideCacheStatus();
   UI.hideClearButton();
 
-  // Show progress while fetching all pages.
+  // 分页抓取期间显示进度，明确用户等待状态。
   isRefreshing = true;
   UI.setRefreshing(true);
   progress.classList.remove('hidden');
   progressCount.textContent = '0';
 
   try {
-    // Fetch all unread pages with duplicate protection.
+    // 分页拉取全部未读，并做去重保护。
     await fetchAllUnread();
 
-    // Save to cache
+    // 成功后写缓存，供下次弹窗快速回显。
     await Cache.save(articles);
 
-    // Show results
+    // 切换到结果视图并开放导出能力。
     progress.classList.add('hidden');
     UI.setRefreshing(false);
 
@@ -264,7 +265,7 @@ async function handleFetch() {
     progress.classList.add('hidden');
     UI.setRefreshing(false);
 
-    // Restore previous cache if available
+    // 抓取失败时回退到旧缓存，保证用户仍可继续导出旧数据。
     if (cacheData && cacheData.articles.length > 0) {
       articles = cacheData.articles;
       displayResults();
@@ -302,14 +303,14 @@ async function fetchAllUnread() {
   while (hasMore) {
     requestCount++;
 
-    // 构建请求体
+    // 构建请求体：固定读取未读视图。
     const body = {
       limit: BATCH_SIZE,
       view: -1,
       read: false
     };
 
-    // `publishedAfter` acts as pagination cursor in Folo API.
+    // `publishedAfter` 在 Folo API 中充当分页游标。
     if (publishedAfter) {
       body.publishedAfter = publishedAfter;
     }
@@ -328,10 +329,10 @@ async function fetchAllUnread() {
       throw new Error('Failed to fetch articles');
     }
 
-    // Parse full response so debug mode can inspect hidden pagination metadata.
+    // 调试模式需要完整响应对象，以便排查分页游标异常。
     const fullResult = await response.json();
 
-    // 调试：打印完整的响应结构（不仅仅是 data），寻找 hidden cursor
+    // 打印完整响应结构（不仅是 data），用于分析隐藏分页字段。
     debugLog(`[Folo Exporter] Response #${requestCount} FULL META:`, fullResult);
 
     const entries = fullResult.data || [];
@@ -366,14 +367,14 @@ async function fetchAllUnread() {
       debugLog(`[Folo Exporter] Added ${newCount} new articles (total: ${articles.length})`);
       progressCount.textContent = articles.length;
 
-      // All-duplicate page usually means cursor stalled; stop to avoid loops.
+      // 当前页全重复通常表示游标停滞，立即停止以避免死循环。
       if (newCount === 0) {
         console.warn(`[Folo Exporter] Pagination failed: got 100% duplicates. Stopping to avoid infinite loop.`);
         hasMore = false;
         break;
       }
 
-      // Move cursor forward using last entry's publish time.
+      // 以最后一条发布时间推进游标，进入下一页。
       const lastEntry = entries[entries.length - 1];
       if (lastEntry?.entries) {
         publishedAfter = lastEntry.entries.publishedAt;
@@ -386,7 +387,7 @@ async function fetchAllUnread() {
       }
     }
 
-    if (requestCount >= 50) { // Safety guard against runaway loops
+    if (requestCount >= 50) { // 安全上限，防止异常情况下请求失控
       console.warn(`[Folo Exporter] Safety limit reached (50 requests)`);
       hasMore = false;
     }
@@ -398,7 +399,7 @@ async function fetchAllUnread() {
 function displayResults() {
   totalCount.textContent = articles.length;
 
-  // Group by category
+  // 按分类聚合统计
   const categories = {};
   for (const article of articles) {
     const cat = article.category;
@@ -408,10 +409,10 @@ function displayResults() {
     categories[cat]++;
   }
 
-  // Sort by count descending
+  // 按分类数量降序
   const sorted = Object.entries(categories).sort((a, b) => b[1] - a[1]);
 
-  // Render
+  // 渲染分类统计区域
   categoryList.innerHTML = sorted.map(([name, count]) => `
     <div class="category-item">
       <span class="category-name">${escapeHtml(name)}</span>
@@ -433,7 +434,7 @@ function generateExport() {
 function generateJSON() {
   const now = new Date();
 
-  // Keep JSON shape in sync with CLI for downstream parser consistency.
+  // JSON 输出与 CLI 对齐，确保下游解析逻辑可复用。
   const exportData = {
     exportTime: now.toISOString(),
     exportTimeFormatted: now.toLocaleString(),
@@ -462,7 +463,7 @@ function generateMarkdown(format) {
   md += `---\n\n`;
 
   if (format === 'grouped') {
-    // Group by category
+    // 分组导出模式：按分类输出
     const grouped = {};
     for (const article of articles) {
       const cat = article.category;
@@ -472,7 +473,7 @@ function generateMarkdown(format) {
       grouped[cat].push(article);
     }
 
-    // Sort categories by count
+    // 分类按文章数量排序
     const sortedCats = Object.entries(grouped).sort((a, b) => b[1].length - a[1].length);
 
     for (const [category, items] of sortedCats) {
@@ -485,7 +486,7 @@ function generateMarkdown(format) {
       md += `---\n\n`;
     }
   } else {
-    // Flat list sorted by time
+    // 列表导出模式：按时间倒序平铺
     const sorted = [...articles].sort((a, b) =>
       new Date(b.publishedAt) - new Date(a.publishedAt)
     );
@@ -524,7 +525,7 @@ async function handleCopy() {
   try {
     await navigator.clipboard.writeText(content);
 
-    // Auto mark-as-read is optional and non-blocking for export success.
+    // 自动标记已读是可选增强，不应影响“已复制成功”主结果。
     if (autoMarkRead.checked) {
       const markResult = await markExportedArticles({ withLoading: true });
       if (markResult.success) {
@@ -550,7 +551,7 @@ async function handleDownload() {
   const format = document.getElementById('format-select').value;
   const content = generateExport();
 
-  // Include HH-mm to avoid clobbering files from same day.
+  // 文件名附加 HH-mm，避免同日多次下载互相覆盖。
   const now = new Date();
   const date = now.toISOString().split('T')[0];
   const hours = String(now.getHours()).padStart(2, '0');
@@ -593,7 +594,7 @@ async function handleDownload() {
   showMessage(`Downloaded ${filename}`, 'success');
 }
 
-// Mark as Read Functions
+// 标记已读相关函数
 function showConfirmDialog() {
   dialogMessage.textContent = `将 ${articles.length} 篇文章标记为已读`;
   confirmDialog.classList.remove('hidden');
@@ -623,7 +624,7 @@ async function confirmMarkAsRead() {
 }
 
 function getUnmarkedEntryIds() {
-  // Get all entry IDs (filter out null IDs and skip already marked ones)
+  // 收集可提交的 entryId：过滤空值，并跳过已标记过的条目。
   const entryIds = articles
     .map(a => a.id)
     .filter(id => id != null && !markedEntryIds.has(id));
@@ -638,7 +639,7 @@ async function markExportedArticles({ withLoading = false } = {}) {
 
   try {
     const result = await markAsRead();
-    // Update local marker set so repeated clicks don't re-submit same IDs.
+    // 维护本地标记集合，避免重复点击导致重复提交。
     if (result.success && result.count > 0) {
       result.entryIds.forEach(id => markedEntryIds.add(id));
       await refreshFoloWebTabs();
@@ -660,7 +661,7 @@ async function refreshFoloWebTabs() {
   if (!chrome.tabs || !chrome.tabs.query) return;
 
   try {
-    // Refresh opened web app tabs so inbox reflects mark-as-read state.
+    // 刷新已打开的 Folo 标签页，让收件箱状态即时同步。
     const tabs = await chrome.tabs.query({});
     const foloTabs = tabs.filter(tab =>
       typeof tab.url === 'string' && tab.url.startsWith('https://app.folo.is')
@@ -706,8 +707,8 @@ async function markAsRead() {
     return { success: true, count: 0, entryIds: [] };
   }
 
-  // Prefer official SDK-style route first, then keep legacy fallback.
-  // Try both api domains to support environment differences.
+  // 先尝试新接口风格，再回退旧接口，兼容不同账号环境。
+  // 同时尝试两个域名，提升跨环境成功率。
   const endpoints = [];
   READ_API_BASES.forEach((base) => {
     endpoints.push({
@@ -721,7 +722,7 @@ async function markAsRead() {
       body: { entryIds }
     });
   });
-  // Legacy endpoint kept as final compatibility fallback.
+  // 兜底保留历史接口，作为最后兼容手段。
   endpoints.push({
     url: `${API_BASE}/reads/markAsRead`,
     method: 'POST',
@@ -757,7 +758,7 @@ async function markAsRead() {
     }
   }
 
-  // Distinguish "feature unavailable" (all 404) from generic request failure.
+  // 区分“接口未开放（全 404）”与“普通请求失败”，给出更准确信号。
   const all404 = failures.length > 0 && failures.every(f => f.status === 404);
   if (all404) {
     return {
