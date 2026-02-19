@@ -9,6 +9,31 @@ const DEFAULT_WEB_URL = 'https://app.folo.is';
 const API_MAX_LIMIT = 100;
 const DEFAULT_BATCH_SIZE = 100;
 const DEFAULT_MAX_REQUESTS = 50;
+const USAGE_EXIT_CODE = 64;
+
+const SUPPORTED_COMMANDS = new Set(['login', 'check-auth', 'fetch']);
+const COMMAND_OPTIONS = {
+  login: new Set(['state', 'api-base', 'headless', 'timeout', 'help', 'h']),
+  'check-auth': new Set(['state', 'cookie', 'api-base', 'help', 'h']),
+  fetch: new Set(['state', 'cookie', 'api-base', 'format', 'out', 'batch-size', 'max-requests', 'help', 'h'])
+};
+const VALUE_REQUIRED_OPTIONS = new Set([
+  'state',
+  'cookie',
+  'api-base',
+  'format',
+  'out',
+  'batch-size',
+  'max-requests',
+  'timeout'
+]);
+
+class CliUsageError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'CliUsageError';
+  }
+}
 
 function printHelp() {
   console.log(`Folo Exporter CLI
@@ -51,7 +76,7 @@ function parseArgs(argv) {
   while (args.length > 0) {
     const token = args.shift();
     if (!token.startsWith('--')) {
-      throw new Error(`Unknown argument: ${token}`);
+      throw new CliUsageError(`Unknown argument: ${token}`);
     }
 
     const key = token.slice(2);
@@ -67,9 +92,28 @@ function parseArgs(argv) {
   return { command, options };
 }
 
+function validateCommandAndOptions(command, options) {
+  if (!SUPPORTED_COMMANDS.has(command)) {
+    throw new CliUsageError(`Unknown command: ${command}`);
+  }
+
+  const allowed = COMMAND_OPTIONS[command];
+  for (const key of Object.keys(options)) {
+    if (!allowed.has(key)) {
+      throw new CliUsageError(`Unknown option for ${command}: --${key}`);
+    }
+    if (VALUE_REQUIRED_OPTIONS.has(key) && options[key] === true) {
+      throw new CliUsageError(`Option --${key} requires a value.`);
+    }
+  }
+}
+
 function resolveStatePath(rawPath) {
   if (!rawPath) {
     return path.join(os.homedir(), '.folo-exporter', 'storage-state.json');
+  }
+  if (typeof rawPath !== 'string' || rawPath.trim() === '') {
+    throw new CliUsageError('Option --state requires a non-empty path.');
   }
   if (rawPath.startsWith('~/')) {
     return path.join(os.homedir(), rawPath.slice(2));
@@ -81,7 +125,7 @@ function toInt(value, fallback, keyName) {
   if (value == null) return fallback;
   const n = Number.parseInt(String(value), 10);
   if (!Number.isFinite(n) || n <= 0) {
-    throw new Error(`Invalid ${keyName}: ${value}`);
+    throw new CliUsageError(`Invalid ${keyName}: ${value}`);
   }
   return n;
 }
@@ -91,7 +135,7 @@ function parseBool(value, fallback) {
   const normalized = String(value).trim().toLowerCase();
   if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
   if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
-  throw new Error(`Invalid boolean value: ${value}`);
+  throw new CliUsageError(`Invalid boolean value: ${value}`);
 }
 
 function ensureDirForFile(filePath) {
@@ -421,7 +465,7 @@ async function runCheckAuth({ apiBase, statePath, cookieArg }) {
 
 async function runFetch({ apiBase, statePath, cookieArg, format, out, batchSize, maxRequests }) {
   if (!['json', 'grouped', 'list'].includes(format)) {
-    throw new Error(`Unsupported format: ${format}`);
+    throw new CliUsageError(`Unsupported format: ${format} (expected: json | grouped | list)`);
   }
 
   const cookieHeader = resolveCookieHeader({ cookieArg, statePath, apiBase });
@@ -457,6 +501,8 @@ async function main() {
     return;
   }
 
+  validateCommandAndOptions(command, options);
+
   const apiBase = String(options['api-base'] || DEFAULT_API_BASE);
   const statePath = resolveStatePath(options.state);
   const cookieArg = options.cookie ? String(options.cookie) : null;
@@ -491,10 +537,15 @@ async function main() {
     return;
   }
 
-  throw new Error(`Unknown command: ${command}`);
 }
 
 main().catch((error) => {
+  if (error instanceof CliUsageError) {
+    console.error(`Usage error: ${error.message}`);
+    console.error('Run "folo-exporter --help" for command usage.');
+    process.exitCode = USAGE_EXIT_CODE;
+    return;
+  }
   console.error(`Error: ${error.message}`);
   process.exitCode = 1;
 });
